@@ -7,51 +7,68 @@ const bcrypt = require("bcrypt");
 // Store the Mongoose schema constructor in a shorter local name.
 const Schema = mongoose.Schema;
 
-// Define the fields and validation rules for user documents.
-const UserSchema = new Schema({
-  // Define the user's display name field.
-  name: {
-    // Store the name as text.
-    type: String,
-    // Require every user to provide a name.
-    required: true,
-    // Prevent multiple users from using the same name.
-    unique: true,
-    // End the name field definition.
-  },
-  // Define the user's email field.
-  email: {
-    // Store the email as text.
-    type: String,
-    // Require every user to provide an email.
-    required: true,
-    // Prevent multiple users from using the same email.
-    unique: true,
-    // End the email field definition.
-  },
-  // Define the user's password field.
-  password: {
-    // Store the password as text or, after saving, a password hash.
-    type: String,
-    // Require every user to provide a password.
-    required: true,
-    // End the password field definition.
-  },
-  // End the user schema field definitions.
-});
+// Define the fields and validation rules for user (staff/admin) documents.
+const UserSchema = new Schema(
+  {
+    // Display name of the user.
+    name: {
+      type: String,
+      required: [true, "Name is required"],
+      unique: true,
+      trim: true,
+    },
 
-// Register a hook that runs before a user document is saved.
+    // Email used to log in.
+    email: {
+      type: String,
+      required: [true, "Email is required"],
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+
+    // Hashed password stored after the pre-save hook runs.
+    password: {
+      type: String,
+      required: [true, "Password is required"],
+      minlength: [6, "Password must be at least 6 characters"],
+    },
+
+    // Role that controls what the user can do in the system.
+    role: {
+      type: String,
+      enum: ["admin", "teacher", "staff"],
+      default: "staff",
+    },
+
+    // Whether the account is currently active.
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    // Automatically add createdAt and updatedAt timestamps.
+    timestamps: true,
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Pre-save hook — hash the password only when it has been modified.
+// ---------------------------------------------------------------------------
 UserSchema.pre("save", async function (next) {
-  // Check whether the password field was changed in this operation.
   if (!this.isModified("password")) return next();
-  // Replace the plain-text password with a bcrypt hash using ten rounds.
   this.password = await bcrypt.hash(this.password, 10);
-  // Tell Mongoose that the pre-save hook has finished.
   next();
 });
 
-// Create a Mongoose model from the user schema.
-const UserModel = mongoose.model("User", UserSchema);
+// ---------------------------------------------------------------------------
+// Instance method — compare a plain-text password against the stored hash.
+// ---------------------------------------------------------------------------
+UserSchema.methods.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
 
-// Export the model so controllers can query and save users.
+// Create and export the Mongoose model.
+const UserModel = mongoose.model("User", UserSchema);
 module.exports = UserModel;

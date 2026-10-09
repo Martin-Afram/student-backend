@@ -1,104 +1,253 @@
-// Import the Mongoose model used to store student records.
+// Import the StudentModel for all database operations.
 const StudentModel = require("../model/student");
 
-// Define the asynchronous controller that creates a student.
-const createUser = async (req, res) => {
-  // Begin handling the create operation.
+// ---------------------------------------------------------------------------
+// Helper — convert a raw score into a letter grade.
+// ---------------------------------------------------------------------------
+const scoreToGrade = (score) => {
+  if (score >= 70) return "A";
+  if (score >= 60) return "B";
+  if (score >= 50) return "C";
+  if (score >= 45) return "D";
+  return "F";
+};
+
+// ---------------------------------------------------------------------------
+// createStudent — create a new student record.
+// POST /students
+// ---------------------------------------------------------------------------
+const createStudent = async (req, res) => {
   try {
-    // Create a student document from the request body.
+    // Auto-derive letter grades when the caller supplies raw scores.
+    if (Array.isArray(req.body.grades)) {
+      req.body.grades = req.body.grades.map((g) => ({
+        ...g,
+        grade: scoreToGrade(g.score),
+      }));
+    }
+
     const student = await StudentModel.create(req.body);
-    // Return the newly created student with a created status.
-    res.status(201).json(student);
-    // Handle validation and database errors.
+    res.status(201).json({ message: "Student created successfully", student });
   } catch (error) {
-    // Return the error message as a bad-request response.
     res.status(400).json({ message: error.message });
   }
 };
 
-// Define the asynchronous controller that retrieves all students.
-const retrieveUser = async (req, res) => {
-  // Begin handling the collection query.
+// ---------------------------------------------------------------------------
+// getAllStudents — retrieve all students with optional filtering, search,
+//                 sorting, and pagination.
+// GET /students?search=&gradeLevel=&status=&page=&limit=&sort=
+// ---------------------------------------------------------------------------
+const getAllStudents = async (req, res) => {
   try {
-    // Query every student document.
-    const student = await StudentModel.find();
-    // Return the student collection with a successful status.
-    res.status(200).json(student);
-    // Handle database query errors.
+    const {
+      search,
+      gradeLevel,
+      status,
+      gender,
+      page = 1,
+      limit = 20,
+      sort = "-createdAt",
+    } = req.query;
+
+    // Build the filter object incrementally.
+    const filter = {};
+
+    // Full-text search across name, studentId, email, and location.
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { studentId: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { location: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (gradeLevel) filter.gradeLevel = { $regex: gradeLevel, $options: "i" };
+    if (status) filter.status = status;
+    if (gender) filter.gender = gender;
+
+    // Pagination arithmetic.
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, parseInt(limit));
+    const skip = (pageNum - 1) * limitNum;
+
+    // Run count and data query in parallel.
+    const [total, students] = await Promise.all([
+      StudentModel.countDocuments(filter),
+      StudentModel.find(filter).sort(sort).skip(skip).limit(limitNum),
+    ]);
+
+    res.status(200).json({
+      total,
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum),
+      count: students.length,
+      students,
+    });
   } catch (error) {
-    // Return the error message as a server-error response.
     res.status(500).json({ message: error.message });
   }
 };
 
-// Define the asynchronous controller that retrieves one student by identifier.
-const getUserById = async (req, res) => {
-  // Begin handling the single-record query.
+// ---------------------------------------------------------------------------
+// getStudentById — retrieve a single student by MongoDB ObjectId.
+// GET /students/:id
+// ---------------------------------------------------------------------------
+const getStudentById = async (req, res) => {
   try {
-    // Find the student whose ID comes from the route parameter.
     const student = await StudentModel.findById(req.params.id);
-    // Return not found when no student matches the requested ID.
-    if (!student) return res.status(404).json({ message: "Not Found" });
-    // Return the matching student with a successful status.
+    if (!student) return res.status(404).json({ message: "Student not found" });
     res.status(200).json(student);
-    // Handle invalid IDs and database query errors.
   } catch (error) {
-    // Return the error message as a server-error response.
     res.status(500).json({ message: error.message });
   }
 };
 
-// Define the asynchronous controller that updates one student.
-const updateUser = async (req, res) => {
-  // Begin handling the update operation.
+// ---------------------------------------------------------------------------
+// updateStudent — update one or more fields of a student record.
+// PATCH /students/:id
+// ---------------------------------------------------------------------------
+const updateStudent = async (req, res) => {
   try {
-    // Find the student by ID and apply the submitted field changes.
+    // Re-derive letter grades when the caller updates scores.
+    if (Array.isArray(req.body.grades)) {
+      req.body.grades = req.body.grades.map((g) => ({
+        ...g,
+        grade: scoreToGrade(g.score),
+      }));
+    }
+
     const student = await StudentModel.findByIdAndUpdate(
-      // Read the student ID from the route parameter.
       req.params.id,
-      // Use the submitted request body as the update data.
       req.body,
-      // Return the updated document and enforce schema validators.
-      { new: true, runValidators: true },
+      { new: true, runValidators: true }
     );
-    // Return not found when no student matches the requested ID.
-    if (!student) return res.status(404).json({ message: "Not found" });
-    // Return the updated student with a successful status.
-    res.status(200).json(student);
-    // Handle invalid IDs, validation, and database errors.
+
+    if (!student) return res.status(404).json({ message: "Student not found" });
+    res.status(200).json({ message: "Student updated successfully", student });
   } catch (error) {
-    // Return the error message as a bad-request response.
     res.status(400).json({ message: error.message });
   }
 };
 
-// Define the asynchronous controller that deletes one student.
-const deleteUser = async (req, res) => {
-  // Begin handling the delete operation.
+// ---------------------------------------------------------------------------
+// deleteStudent — permanently remove a student record.
+// DELETE /students/:id
+// ---------------------------------------------------------------------------
+const deleteStudent = async (req, res) => {
   try {
-    // Delete the student whose ID comes from the route parameter.
     const student = await StudentModel.findByIdAndDelete(req.params.id);
-    // Return not found when no student matches the requested ID.
-    if (!student) return res.status(404).json({ message: "Not found" });
-    // Confirm that the student was deleted successfully.
-    res.status(200).json({ message: "Deleted" });
-    // Handle invalid IDs and database errors.
+    if (!student) return res.status(404).json({ message: "Student not found" });
+    res.status(200).json({ message: `Student ${student.name} deleted successfully` });
   } catch (error) {
-    // Return the error message as a server-error response.
     res.status(500).json({ message: error.message });
   }
 };
 
-// Export every student controller for use by the student routes.
+// ---------------------------------------------------------------------------
+// addGrade — append a grade entry to a specific student.
+// POST /students/:id/grades
+// ---------------------------------------------------------------------------
+const addGrade = async (req, res) => {
+  try {
+    const { subject, score, term, session } = req.body;
+
+    if (!subject || score === undefined) {
+      return res.status(400).json({ message: "Subject and score are required" });
+    }
+
+    const gradeEntry = { subject, score, grade: scoreToGrade(score), term, session };
+
+    const student = await StudentModel.findByIdAndUpdate(
+      req.params.id,
+      { $push: { grades: gradeEntry } },
+      { new: true, runValidators: true }
+    );
+
+    if (!student) return res.status(404).json({ message: "Student not found" });
+    res.status(200).json({ message: "Grade added", student });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// updateAttendance — mark attendance for a given student.
+// PATCH /students/:id/attendance
+// Body: { totalDays, daysPresent }
+// ---------------------------------------------------------------------------
+const updateAttendance = async (req, res) => {
+  try {
+    const { totalDays, daysPresent } = req.body;
+
+    if (totalDays === undefined || daysPresent === undefined) {
+      return res.status(400).json({ message: "totalDays and daysPresent are required" });
+    }
+
+    if (daysPresent > totalDays) {
+      return res.status(400).json({ message: "Days present cannot exceed total days" });
+    }
+
+    const student = await StudentModel.findByIdAndUpdate(
+      req.params.id,
+      { attendance: { totalDays, daysPresent } },
+      { new: true }
+    );
+
+    if (!student) return res.status(404).json({ message: "Student not found" });
+    res.status(200).json({
+      message: "Attendance updated",
+      attendancePercentage: student.attendancePercentage + "%",
+      student,
+    });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// getDashboardStats — aggregate summary figures for the dashboard.
+// GET /students/stats
+// ---------------------------------------------------------------------------
+const getDashboardStats = async (req, res) => {
+  try {
+    const [
+      totalStudents,
+      activeStudents,
+      genderBreakdown,
+      gradeBreakdown,
+    ] = await Promise.all([
+      StudentModel.countDocuments(),
+      StudentModel.countDocuments({ status: "active" }),
+      StudentModel.aggregate([
+        { $group: { _id: "$gender", count: { $sum: 1 } } },
+      ]),
+      StudentModel.aggregate([
+        { $group: { _id: "$gradeLevel", count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ]),
+    ]);
+
+    res.status(200).json({
+      totalStudents,
+      activeStudents,
+      inactiveStudents: totalStudents - activeStudents,
+      genderBreakdown,
+      gradeBreakdown,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
-  // Export the controller that retrieves all students.
-  retrieveUser,
-  // Export the controller that creates a student.
-  createUser,
-  // Export the controller that retrieves one student.
-  getUserById,
-  // Export the controller that updates a student.
-  updateUser,
-  // Export the controller that deletes a student.
-  deleteUser,
+  createStudent,
+  getAllStudents,
+  getStudentById,
+  updateStudent,
+  deleteStudent,
+  addGrade,
+  updateAttendance,
+  getDashboardStats,
 };

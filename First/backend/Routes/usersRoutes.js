@@ -1,38 +1,45 @@
-// Import the Express framework.
 const express = require("express");
-
-// Import the controller that handles student requests.
-const {
-  // Handle requests for all students.
-  retrieveUser,
-  // Handle requests that create a student.
-  createUser,
-  // Handle requests for one student.
-  getUserById,
-  // Handle requests that update a student.
-  updateUser,
-  // Handle requests that delete a student.
-  deleteUser,
-  // Load the controller functions from the student controller module.
-} = require("../Controllers/usersController");
-
-// Create a dedicated router for student endpoints.
 const router = express.Router();
 
-// Define the endpoint that retrieves every student.
-router.get("/students", retrieveUser);
+const {
+  createStudent,
+  getAllStudents,
+  getStudentById,
+  updateStudent,
+  deleteStudent,
+  addGrade,
+  updateAttendance,
+  getDashboardStats,
+} = require("../Controllers/usersController");
 
-// Define the endpoint that creates a new student.
-router.post("/students", createUser);
+const { protect, authorise } = require("../middleware/authMiddleware");
 
-// Define the endpoint that retrieves one student by ID.
-router.get("/students/:id", getUserById);
+// ---------------------------------------------------------------------------
+// All student routes are protected — caller must supply a valid JWT.
+// ---------------------------------------------------------------------------
 
-// Define the endpoint that updates one student by ID.
-router.patch("/students/:id", updateUser);
+// GET  /students/stats  — dashboard summary (admin & teachers only).
+router.get("/students/stats", protect, authorise("admin", "teacher"), getDashboardStats);
 
-// Define the endpoint that deletes one student by ID.
-router.delete("/students/:id", deleteUser);
+// GET  /students        — list all students (search, filter, paginate).
+router.get("/students", protect, getAllStudents);
 
-// Export the configured student router.
+// POST /students        — create a new student (admin & teachers).
+router.post("/students", protect, authorise("admin", "teacher"), createStudent);
+
+// GET  /students/:id    — get one student by ID.
+router.get("/students/:id", protect, getStudentById);
+
+// PATCH /students/:id   — update student details (admin & teachers).
+router.patch("/students/:id", protect, authorise("admin", "teacher"), updateStudent);
+
+// DELETE /students/:id  — permanently delete a student (admin only).
+router.delete("/students/:id", protect, authorise("admin"), deleteStudent);
+
+// POST /students/:id/grades     — add a grade entry to a student.
+router.post("/students/:id/grades", protect, authorise("admin", "teacher"), addGrade);
+
+// PATCH /students/:id/attendance — update attendance record.
+router.patch("/students/:id/attendance", protect, authorise("admin", "teacher"), updateAttendance);
+
 module.exports = router;
